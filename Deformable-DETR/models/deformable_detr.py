@@ -308,17 +308,61 @@ class SetCriterion(nn.Module):
         return losses
 
     def loss_track_a(self, outputs, targets, indices, num_boxes):
-        """Aleatoric uncertainty loss using per-box predicted log-variance."""
+        """Heteroscedastic uncertainty loss (MSE-based, numerically stable)
+        
+        Loss = error² / var + log(var)
+        
+        This is the standard form for aleatoric uncertainty quantification.
+        Key improvements:
+        - Uses MSE (L2) instead of L1 for better gradients
+        - Uses error²/var + log(var) instead of exp(-log_var)*error + log_var
+        - Tight clamping prevents numerical explosion
+        - NaN guards catch any remaining issues
+        """
         assert 'pred_boxes' in outputs
         assert 'pred_log_vars' in outputs
+        
         idx = self._get_src_permutation_idx(indices)
         src_boxes = outputs['pred_boxes'][idx]
         src_log_vars = outputs['pred_log_vars'][idx]
         target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
-
-        l1 = torch.abs(src_boxes - target_boxes)
-        heteroscedastic = torch.exp(-src_log_vars) * l1 + src_log_vars
-        losses = {'loss_track_a': heteroscedastic.sum() / num_boxes}
+        
+        # Compute L2 error (MSE gives better gradients than L1)
+        error = (src_boxes - target_boxes) ** 2
+        
+        # CRITICAL: Tight clamping BEFORE computing loss
+        # This bounds log_var ∈ [-4, 4] → variance ∈ [0.018, 54.6]
+        # Prevents untrained head from outputting extreme values
+        log_var_clamped = torch.clamp(src_log_vars, min=-4.0, max=4.0)
+        
+        # Compute variance (now guaranteed to be in safe range)
+        var = torch.exp(log_var_clamped)
+        
+        # Numerically stable heteroscedastic NLL loss
+        # Standard form: Loss = 0.5 * (error² / var + log(var))
+        # We omit the 0.5 factor for easier hyperparameter tuning
+        nll_loss = error / var + log_var_clamped
+        
+        # Extra safety: clamp loss to prevent extreme values
+        nll_loss = torch.clamp(nll_loss, min=0.0, max=100.0)
+        
+        # NaN guard #1: Check element-wise for NaN
+        if torch.isnan(nll_loss).any():
+            print(f"WARNING: NaN detected in Track A loss (element-wise)")
+            print(f"  error range: [{error.min():.4f}, {error.max():.4f}]")
+            print(f"  log_var range: [{log_var_clamped.min():.4f}, {log_var_clamped.max():.4f}]")
+            print(f"  var range: [{var.min():.4f}, {var.max():.4f}]")
+            return {'loss_track_a': torch.tensor(0.0, device=src_boxes.device, requires_grad=True)}
+        
+        # Aggregate loss
+        loss_value = nll_loss.mean()
+        
+        # NaN guard #2: Check final loss
+        if torch.isnan(loss_value) or torch.isinf(loss_value):
+            print(f"WARNING: Final Track A loss is invalid: {loss_value}")
+            return {'loss_track_a': torch.tensor(0.0, device=src_boxes.device, requires_grad=True)}
+        
+        losses = {'loss_track_a': loss_value}
         return losses
 
     def loss_masks(self, outputs, targets, indices, num_boxes):
