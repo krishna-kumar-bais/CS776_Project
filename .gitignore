@@ -1,0 +1,19 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Model checkpoints (large binary files)
+*.pth
+*.ckpt
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Virtual environments
+venv/
+env/
+deformable_detr_env/
+
+# macOS
+.DS_Store
