@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
 """
 Verify Deformable DETR checkpoint and display baseline AP
+
+Usage
+-----
+    python verify_checkpoint.py [checkpoint_path]
+
+If no path is provided, the script looks for the official checkpoint at
+    Deformable-DETR/models/r50_deformable_detr-checkpoint.pth
+relative to the script's directory.
 """
 
 import os
 import sys
 import torch
 
-# Add Deformable DETR to path
-sys.path.insert(0, '/Users/krishna/Desktop/CV_Project/Deformable-DETR')
+# Add Deformable DETR to path (relative to this script's location)
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_SCRIPT_DIR, 'Deformable-DETR'))
 
 def verify_checkpoint(checkpoint_path):
     """Load and verify checkpoint"""
@@ -117,7 +126,15 @@ def verify_checkpoint(checkpoint_path):
     return True
 
 if __name__ == "__main__":
-    checkpoint_path = "/Users/krishna/Desktop/CV_Project/Deformable-DETR/models/r50_deformable_detr-checkpoint.pth"
+    if len(sys.argv) > 1:
+        checkpoint_path = sys.argv[1]
+    else:
+        checkpoint_path = os.path.join(
+            _SCRIPT_DIR,
+            "Deformable-DETR",
+            "models",
+            "r50_deformable_detr-checkpoint.pth",
+        )
     
     if os.path.exists(checkpoint_path):
         verify_checkpoint(checkpoint_path)
